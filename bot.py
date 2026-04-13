@@ -1,6 +1,6 @@
 """
-Telegram-бот для обработки презентаций.
-Запуск: python bot.py
+Telegram-bot for processing presentations.
+Run: python bot.py
 """
 import logging
 import os
@@ -30,14 +30,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Состояния диалога
 WAITING_FILE = 0
 WAITING_AUDIENCE = 1
 ITERATING = 2
 
 
 async def error_handler(update: object, context) -> None:
-    """Логирует ошибки."""
     logger.error("Exception while handling an update:", exc_info=context.error)
 
 
@@ -74,11 +72,10 @@ def main():
     app.add_handler(conv_handler)
     app.add_error_handler(error_handler)
 
-    print("\u2705 Бот запущен. Нажми Ctrl+C для остановки.")
+    print("Bot started.")
     app.run_polling(drop_pending_updates=True)
 
 
 if __name__ == "__main__":
     main()
-"""
-Telegram-бот для обработки презентаций.
+
