@@ -3,7 +3,6 @@ Telegram-bot for processing presentations.
 Run: python bot.py
 """
 import logging
-import os
 from telegram import Update
 from telegram.ext import (
     Application,
@@ -18,7 +17,7 @@ from handlers import (
     start,
     handle_file,
     handle_text_request,
-    handle_audience_choice,
+    handle_theme_choice,
     handle_iteration_feedback,
     cancel,
 )
@@ -31,7 +30,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 WAITING_FILE = 0
-WAITING_AUDIENCE = 1
+WAITING_THEME = 1
 ITERATING = 2
 
 
@@ -53,8 +52,8 @@ def main():
                 MessageHandler(filters.Document.ALL, handle_file),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_request),
             ],
-            WAITING_AUDIENCE: [
-                CallbackQueryHandler(handle_audience_choice),
+            WAITING_THEME: [
+                CallbackQueryHandler(handle_theme_choice),
             ],
             ITERATING: [
                 CallbackQueryHandler(handle_iteration_feedback),
@@ -71,11 +70,9 @@ def main():
 
     app.add_handler(conv_handler)
     app.add_error_handler(error_handler)
-
     print("Bot started.")
     app.run_polling(drop_pending_updates=True)
 
 
 if __name__ == "__main__":
     main()
-
