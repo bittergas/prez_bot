@@ -1,206 +1,185 @@
 """
 Обработка .pptx файлов:
-- fix_internal_pptx  — корпоративный стиль для внутренних отчётов
-- process_for_client — применяет улучшенный контент от Claude
-- quick_fix_pptx     — быстрая шлифовка рабочего материала
+- process_for_client — применяет улучшенный контент от Claude с темой
 """
 import os
-import copy
 import tempfile
 import logging
 
 from pptx import Presentation
-from pptx.util import Pt, Emu
+from pptx.util import Pt, Emu, Cm
 from pptx.dml.color import RGBColor
 from pptx.enum.text import PP_ALIGN
 
-from config import BRAND_COLORS, BRAND_FONT
-
 logger = logging.getLogger(__name__)
 
-PRIMARY   = RGBColor(*BRAND_COLORS["primary"])
-SECONDARY = RGBColor(*BRAND_COLORS["secondary"])
-ACCENT    = RGBColor(*BRAND_COLORS["accent"])
-TEXT_CLR  = RGBColor(*BRAND_COLORS["text"])
-
 
 # ──────────────────────────────────────────────
-#  1. ВНУТРЕННИЙ ОТЧЁТ
+# ЦВЕТА ПО ТЕМАМ
 # ──────────────────────────────────────────────
 
-def fix_internal_pptx(file_path: str) -> str:
-    """
-    Приводит презентацию к корпоративному стилю:
-    - Унифицирует шрифты
-    - Исправляет цвета заголовков
-    - Выравнивает текст
-    - Нормализует размеры шрифтов
-    """
-    prs = Presentation(file_path)
-
-    for slide in prs.slides:
-        for shape in slide.shapes:
-            if not shape.has_text_frame:
-                continue
-
-            is_title = _is_title_shape(shape)
-
-            for para in shape.text_frame.paragraphs:
-                # Выравнивание: заголовки по левому краю, текст тоже
-                if para.alignment not in (PP_ALIGN.LEFT, PP_ALIGN.CENTER):
-                    para.alignment = PP_ALIGN.LEFT
-
-                for run in para.runs:
-                    # Шрифт
-                    run.font.name = BRAND_FONT
-
-                    # Цвет
-                    if is_title:
-                        run.font.color.rgb = PRIMARY
-                        # Нормализуем размер заголовка
-                        if run.font.size and run.font.size > Pt(40):
-                            run.font.size = Pt(36)
-                        elif not run.font.size or run.font.size < Pt(20):
-                            run.font.size = Pt(28)
-                    else:
-                        # Убираем случайные яркие цвета в теле текста
-                        try:
-                            clr = run.font.color.rgb
-                            if _is_weird_color(clr):
-                                run.font.color.rgb = TEXT_CLR
-                        except Exception:
-                            run.font.color.rgb = TEXT_CLR
-
-                        # Нормализуем размер тела
-                        if run.font.size and run.font.size > Pt(24):
-                            run.font.size = Pt(18)
-                        elif not run.font.size or run.font.size < Pt(10):
-                            run.font.size = Pt(14)
-
-    return _save_tmp(prs, "internal")
+THEME_COLORS = {
+    "dark": {
+        "bg_primary": RGBColor(0x07, 0x09, 0x0E),
+        "bg_secondary": RGBColor(0x0C, 0x10, 0x18),
+        "bg_final": RGBColor(0x04, 0x05, 0x09),
+        "title": RGBColor(0xFD, 0xFA, 0xF5),
+        "body": RGBColor(0xBD, 0xB8, 0xAB),
+        "accent": RGBColor(0xE0, 0x82, 0x56),
+        "font_heading": "Arial",
+        "font_body": "Arial",
+    },
+    "light": {
+        "bg_primary": RGBColor(0xF1, 0xE9, 0xD7),
+        "bg_secondary": RGBColor(0xEA, 0xE0, 0xCC),
+        "bg_final": RGBColor(0xE0, 0xD5, 0xC0),
+        "title": RGBColor(0x07, 0x09, 0x0E),
+        "body": RGBColor(0x5A, 0x5C, 0x62),
+        "accent": RGBColor(0xA0, 0x5C, 0x3A),
+        "font_heading": "Arial",
+        "font_body": "Arial",
+    },
+    "combined": {
+        "bg_primary": RGBColor(0x07, 0x09, 0x0E),
+        "bg_secondary": RGBColor(0x0C, 0x10, 0x18),
+        "bg_final": RGBColor(0x04, 0x05, 0x09),
+        "bg_light": RGBColor(0xF1, 0xE9, 0xD7),
+        "title_dark": RGBColor(0xFD, 0xFA, 0xF5),
+        "title_light": RGBColor(0x07, 0x09, 0x0E),
+        "body_dark": RGBColor(0xBD, 0xB8, 0xAB),
+        "body_light": RGBColor(0x5A, 0x5C, 0x62),
+        "accent_dark": RGBColor(0xE0, 0x82, 0x56),
+        "accent_light": RGBColor(0xA0, 0x5C, 0x3A),
+        "font_heading": "Arial",
+        "font_body": "Arial",
+    },
+}
 
 
-# ──────────────────────────────────────────────
-#  2. ДЛЯ КЛИЕНТОВ
-# ──────────────────────────────────────────────
-
-def process_for_client(file_path: str | None, slides_data: list[dict]) -> str:
-    """
-    Применяет улучшенный контент от Claude к существующим слайдам.
-    Если файла нет — создаёт новую презентацию с нуля.
-    """
+def process_for_client(
+    file_path: str | None,
+    slides_data: list[dict],
+    theme: str = "combined",
+) -> str:
     if file_path:
         prs = Presentation(file_path)
-        _apply_content(prs, slides_data)
+        _apply_content(prs, slides_data, theme)
     else:
-        prs = _create_from_scratch(slides_data)
+        prs = _create_from_scratch(slides_data, theme)
+    return _save_tmp(prs, "presentation")
 
-    return _save_tmp(prs, "client")
 
-
-def _apply_content(prs: Presentation, slides_data: list[dict]):
-    """Заменяет текст слайдов на улучшенный вариант."""
+def _apply_content(prs: Presentation, slides_data: list[dict], theme: str):
+    colors = THEME_COLORS.get(theme, THEME_COLORS["combined"])
     for item in slides_data:
-        idx = item.get("slide_index", 1) - 1  # 0-based
+        idx = item.get("slide_index", 1) - 1
         if idx < 0 or idx >= len(prs.slides):
             continue
-
         slide = prs.slides[idx]
         title_set = False
-        body_set  = False
-
+        body_set = False
         for shape in slide.shapes:
             if not shape.has_text_frame:
                 continue
-
             if _is_title_shape(shape) and not title_set:
-                _replace_text(shape, item.get("title", ""))
+                _replace_text(shape, item.get("title", ""),
+                              colors.get("title", colors.get("title_dark")),
+                              colors.get("font_heading", "Arial"),
+                              Pt(28))
                 title_set = True
             elif not body_set and not _is_title_shape(shape):
-                _replace_text(shape, item.get("body", ""))
+                _replace_text(shape, item.get("body", ""),
+                              colors.get("body", colors.get("body_dark")),
+                              colors.get("font_body", "Arial"),
+                              Pt(16))
                 body_set = True
 
 
-def _create_from_scratch(slides_data: list[dict]) -> Presentation:
-    """Создаёт новую .pptx по данным от Claude."""
+def _create_from_scratch(slides_data: list[dict], theme: str) -> Presentation:
     prs = Presentation()
-    slide_layout = prs.slide_layouts[1]  # Title and Content
+    prs.slide_width = Cm(33.867)
+    prs.slide_height = Cm(19.05)
+
+    colors = THEME_COLORS.get(theme, THEME_COLORS["combined"])
+    slide_layout = prs.slide_layouts[6]  # Blank layout
 
     for item in slides_data:
         slide = prs.slides.add_slide(slide_layout)
-        title = slide.shapes.title
-        body  = slide.placeholders[1] if len(slide.placeholders) > 1 else None
 
-        if title:
-            title.text = item.get("title", "")
-            for run in title.text_frame.paragraphs[0].runs:
-                run.font.bold  = True
-                run.font.color.rgb = PRIMARY
-                run.font.size  = Pt(28)
-                run.font.name  = BRAND_FONT
+        # Определяем цвета для этого слайда
+        bg_hex = item.get("bg_color", "")
+        if bg_hex:
+            try:
+                bg_rgb = RGBColor(
+                    int(bg_hex[1:3], 16),
+                    int(bg_hex[3:5], 16),
+                    int(bg_hex[5:7], 16),
+                )
+            except (ValueError, IndexError):
+                bg_rgb = colors.get("bg_primary", RGBColor(0x07, 0x09, 0x0E))
+        else:
+            bg_rgb = colors.get("bg_primary", RGBColor(0x07, 0x09, 0x0E))
 
-        if body:
-            tf = body.text_frame
-            tf.clear()
+        # Ставим фон
+        background = slide.background
+        fill = background.fill
+        fill.solid()
+        fill.fore_color.rgb = bg_rgb
+
+        # Определяем цвета текста по яркости фона
+        brightness = (bg_rgb[0] * 299 + bg_rgb[1] * 587 + bg_rgb[2] * 114) / 1000
+        is_dark_bg = brightness < 128
+        title_color = RGBColor(0xFD, 0xFA, 0xF5) if is_dark_bg else RGBColor(0x07, 0x09, 0x0E)
+        body_color = RGBColor(0xBD, 0xB8, 0xAB) if is_dark_bg else RGBColor(0x5A, 0x5C, 0x62)
+        accent_color = RGBColor(0xE0, 0x82, 0x56) if is_dark_bg else RGBColor(0xA0, 0x5C, 0x3A)
+
+        # Заголовок
+        title_text = item.get("title", "")
+        if title_text:
+            from pptx.util import Inches
+            left = Cm(2)
+            top = Cm(2.5)
+            width = Cm(29)
+            height = Cm(4)
+            txBox = slide.shapes.add_textbox(left, top, width, height)
+            tf = txBox.text_frame
+            tf.word_wrap = True
             p = tf.paragraphs[0]
-            p.text = item.get("body", "")
+            p.text = title_text
+            p.alignment = PP_ALIGN.LEFT
             for run in p.runs:
-                run.font.name  = BRAND_FONT
-                run.font.size  = Pt(16)
-                run.font.color.rgb = TEXT_CLR
+                run.font.name = colors.get("font_heading", "Arial")
+                run.font.size = Pt(36)
+                run.font.bold = True
+                run.font.color.rgb = title_color
+
+        # Тело
+        body_text = item.get("body", "")
+        if body_text:
+            left = Cm(2)
+            top = Cm(7.5)
+            width = Cm(29)
+            height = Cm(10)
+            txBox = slide.shapes.add_textbox(left, top, width, height)
+            tf = txBox.text_frame
+            tf.word_wrap = True
+            p = tf.paragraphs[0]
+            p.text = body_text
+            p.alignment = PP_ALIGN.LEFT
+            for run in p.runs:
+                run.font.name = colors.get("font_body", "Arial")
+                run.font.size = Pt(16)
+                run.font.color.rgb = body_color
 
     return prs
 
 
 # ──────────────────────────────────────────────
-#  3. РАБОЧИЙ МАТЕРИАЛ
-# ──────────────────────────────────────────────
-
-def quick_fix_pptx(file_path: str) -> str:
-    """
-    Минимальная шлифовка:
-    - Убирает двойные пробелы
-    - Исправляет регистр заголовков (Первая буква заглавная)
-    - Стандартизирует шрифт
-    """
-    prs = Presentation(file_path)
-
-    for slide in prs.slides:
-        for shape in slide.shapes:
-            if not shape.has_text_frame:
-                continue
-
-            is_title = _is_title_shape(shape)
-
-            for para in shape.text_frame.paragraphs:
-                full_text = para.text
-
-                # Убираем двойные пробелы
-                cleaned = " ".join(full_text.split())
-
-                # Заголовки: первая буква заглавная
-                if is_title and cleaned:
-                    cleaned = cleaned[0].upper() + cleaned[1:]
-
-                # Применяем обратно если есть изменения
-                if cleaned != full_text and para.runs:
-                    para.runs[0].text = cleaned
-                    for run in para.runs[1:]:
-                        run.text = ""
-
-                for run in para.runs:
-                    run.font.name = BRAND_FONT
-
-    return _save_tmp(prs, "work")
-
-
-# ──────────────────────────────────────────────
-#  УТИЛИТЫ
+# УТИЛИТЫ
 # ──────────────────────────────────────────────
 
 def _is_title_shape(shape) -> bool:
     try:
-        from pptx.enum.shapes import PP_PLACEHOLDER
         ph = shape.placeholder_format
         if ph is None:
             return False
@@ -209,48 +188,41 @@ def _is_title_shape(shape) -> bool:
         return False
 
 
-def _is_weird_color(rgb: RGBColor) -> bool:
-    """Определяет нелепые цвета — слишком яркие или нестандартные."""
-    r, g, b = rgb[0], rgb[1], rgb[2]
-    # Считаем "странным" если один канал сильно доминирует
-    max_c = max(r, g, b)
-    min_c = min(r, g, b)
-    saturation = (max_c - min_c) / max_c if max_c > 0 else 0
-    return saturation > 0.6 and max_c > 200
-
-
-def _replace_text(shape, new_text: str):
-    """Заменяет весь текст в shape, сохраняя первый run."""
+def _replace_text(shape, new_text: str, color=None, font_name="Arial", font_size=None):
     tf = shape.text_frame
     if not tf.paragraphs:
         return
 
-    # Сохраняем форматирование первого run
-    first_para = tf.paragraphs[0]
-
-    # Удаляем все параграфы кроме первого
     from pptx.oxml.ns import qn
     txBody = tf._txBody
     for p in txBody.findall(qn("a:p"))[1:]:
         txBody.remove(p)
 
-    # Ставим текст в первый параграф
+    first_para = tf.paragraphs[0]
     if first_para.runs:
         first_para.runs[0].text = new_text
+        if color:
+            first_para.runs[0].font.color.rgb = color
+        if font_name:
+            first_para.runs[0].font.name = font_name
+        if font_size:
+            first_para.runs[0].font.size = font_size
         for run in first_para.runs[1:]:
             run.text = ""
     else:
         run = first_para.add_run()
         run.text = new_text
-        run.font.name = BRAND_FONT
+        if color:
+            run.font.color.rgb = color
+        if font_name:
+            run.font.name = font_name
+        if font_size:
+            run.font.size = font_size
 
 
 def _save_tmp(prs: Presentation, prefix: str) -> str:
-    """Сохраняет во временный файл и возвращает путь."""
     tmp = tempfile.NamedTemporaryFile(
-        suffix=".pptx",
-        prefix=f"{prefix}_",
-        delete=False
+        suffix=".pptx", prefix=f"{prefix}_", delete=False
     )
     prs.save(tmp.name)
     tmp.close()
