@@ -4,7 +4,6 @@
 """
 import tempfile
 import logging
-
 from pptx import Presentation
 from pptx.util import Pt, Cm, Emu
 from pptx.dml.color import RGBColor
@@ -20,30 +19,13 @@ CONTENT_H = SLIDE_H - 2 * MARGIN
 
 
 def process_for_client(file_path, slides_data, theme="combined"):
-    if file_path:
-        prs = Presentation(file_path)
-        _apply_content(prs, slides_data, theme)
-    else:
-        prs = _create_from_scratch(slides_data, theme)
+    """
+    Всегда создаём с нуля — даже если был исходный файл.
+    Исходный файл используется только для извлечения текста (на этапе claude_client).
+    Генерация pptx всегда from scratch для гарантии правильных цветов и лейаутов.
+    """
+    prs = _create_from_scratch(slides_data, theme)
     return _save_tmp(prs)
-
-
-def _apply_content(prs, slides_data, theme):
-    for item in slides_data:
-        idx = item.get("slide_index", 1) - 1
-        if idx < 0 or idx >= len(prs.slides):
-            continue
-        slide = prs.slides[idx]
-        title_set = body_set = False
-        for shape in slide.shapes:
-            if not shape.has_text_frame:
-                continue
-            if _is_title_shape(shape) and not title_set:
-                _set_text(shape.text_frame, item.get("title", ""))
-                title_set = True
-            elif not body_set and not _is_title_shape(shape):
-                _set_text(shape.text_frame, item.get("body", ""))
-                body_set = True
 
 
 def _create_from_scratch(slides_data, theme):
@@ -62,8 +44,7 @@ def _create_from_scratch(slides_data, theme):
         dark = bri < 128
         tc = _colors(dark)
 
-        stype = item.get("slide_type", "content")
-        layout = item.get("layout", stype)
+        layout = item.get("layout", item.get("slide_type", "content"))
 
         if layout == "hero":
             _build_hero(slide, item, tc)
@@ -85,7 +66,7 @@ def _create_from_scratch(slides_data, theme):
     return prs
 
 
-# ─── LAYOUTS ──────────────────────────────────────
+# ─── LAYOUTS ──────────────────────────────────────────────
 
 def _build_hero(slide, item, tc):
     # Лейбл сверху
@@ -94,25 +75,24 @@ def _build_hero(slide, item, tc):
         tb = slide.shapes.add_textbox(MARGIN, Cm(2.5), CONTENT_W, Cm(1.2))
         _style(tb.text_frame, label.upper(), tc["accent"], Pt(11), bold=False, spacing=2200)
 
-    # Крупный заголовок
+    # Крупный заголовок — ограничен шириной 22cm чтобы не вылезал за декор
     title = item.get("title", "")
-    tb = slide.shapes.add_textbox(MARGIN, Cm(4.5), Cm(22), Cm(6))
+    tb = slide.shapes.add_textbox(MARGIN, Cm(5), Cm(22), Cm(6))
     _style(tb.text_frame, title, tc["title"], Pt(54), bold=True, ls=-200)
 
     # Подзаголовок
     body = item.get("body", "")
     if body:
-        tb = slide.shapes.add_textbox(MARGIN, Cm(11.5), Cm(20), Cm(4))
+        tb = slide.shapes.add_textbox(MARGIN, Cm(12), Cm(20), Cm(3.5))
         _style(tb.text_frame, body, tc["muted"], Pt(16))
 
-    # Декор — терракотовые полоски
-    _add_bars(slide, Cm(28), Cm(3), tc["accent"])
+    # Декор — терракотовые полоски (смещены внутрь полей)
+    _add_bars(slide, Cm(26), Cm(4), tc["accent"])
 
 
 def _build_cta(slide, item, tc):
-    # Заголовок по центру
     title = item.get("title", "")
-    tb = slide.shapes.add_textbox(Cm(4), Cm(5), Cm(26), Cm(5))
+    tb = slide.shapes.add_textbox(Cm(4), Cm(5.5), Cm(26), Cm(5))
     tf = tb.text_frame
     tf.word_wrap = True
     p = tf.paragraphs[0]
@@ -122,7 +102,7 @@ def _build_cta(slide, item, tc):
 
     body = item.get("body", "")
     if body:
-        tb2 = slide.shapes.add_textbox(Cm(6), Cm(11), Cm(22), Cm(4))
+        tb2 = slide.shapes.add_textbox(Cm(6), Cm(11.5), Cm(22), Cm(4))
         tf2 = tb2.text_frame
         tf2.word_wrap = True
         p2 = tf2.paragraphs[0]
@@ -138,12 +118,12 @@ def _build_quote(slide, item, tc):
         _style(tb.text_frame, label.upper(), tc["accent"], Pt(11), bold=False, spacing=2200)
 
     title = item.get("title", "")
-    tb = slide.shapes.add_textbox(MARGIN, Cm(5), Cm(24), Cm(6))
-    _style(tb.text_frame, title, tc["title"], Pt(36), bold=True, ls=-200)
+    tb = slide.shapes.add_textbox(MARGIN, Cm(5.5), Cm(24), Cm(6))
+    _style(tb.text_frame, title, tc["title"], Pt(32), bold=True, ls=-200)
 
     body = item.get("body", "")
     if body:
-        tb = slide.shapes.add_textbox(MARGIN, Cm(12), Cm(28), Cm(4))
+        tb = slide.shapes.add_textbox(MARGIN, Cm(12.5), Cm(24), Cm(3.5))
         _style(tb.text_frame, body, tc["body"], Pt(14))
 
 
@@ -157,11 +137,11 @@ def _build_2col(slide, item, tc):
     lw = Cm(16)
     title = item.get("title", "")
     tb = slide.shapes.add_textbox(MARGIN, Cm(4), lw, Cm(4))
-    _style(tb.text_frame, title, tc["title"], Pt(36), bold=True, ls=-200)
+    _style(tb.text_frame, title, tc["title"], Pt(32), bold=True, ls=-200)
 
     body = item.get("body", "")
     if body:
-        tb = slide.shapes.add_textbox(MARGIN, Cm(9), lw, Cm(8))
+        tb = slide.shapes.add_textbox(MARGIN, Cm(9), lw, Cm(7))
         _style(tb.text_frame, body, tc["body"], Pt(14))
 
     # Правая колонка 45%
@@ -176,7 +156,7 @@ def _build_2col(slide, item, tc):
             tb = slide.shapes.add_textbox(rx, y, rw, Cm(1.8))
             _style(tb.text_frame, str(val), tc["accent"], Pt(42), bold=True)
             if desc:
-                tb2 = slide.shapes.add_textbox(rx, y + Cm(2), rw, Cm(1.5))
+                tb2 = slide.shapes.add_textbox(rx, y + Cm(2.2), rw, Cm(1.5))
                 _style(tb2.text_frame, desc, tc["muted"], Pt(12))
             y += Cm(4)
 
@@ -190,7 +170,7 @@ def _build_3col(slide, item, tc):
     title = item.get("title", "")
     if title:
         tb = slide.shapes.add_textbox(MARGIN, Cm(3.8), CONTENT_W, Cm(3))
-        _style(tb.text_frame, title, tc["title"], Pt(30), bold=True, ls=-200)
+        _style(tb.text_frame, title, tc["title"], Pt(28), bold=True, ls=-200)
 
     cols = item.get("columns", [])
     cw = Cm(9.5)
@@ -201,14 +181,15 @@ def _build_3col(slide, item, tc):
         ct = col.get("title", "")
         cd = col.get("description", col.get("body", ""))
         num = col.get("number", "")
+
         if num:
             tb = slide.shapes.add_textbox(x, y, cw, Cm(1.5))
             _style(tb.text_frame, str(num), tc["accent"], Pt(14), bold=True)
         if ct:
             tb = slide.shapes.add_textbox(x, y + Cm(1.8), cw, Cm(2))
-            _style(tb.text_frame, ct, tc["title"], Pt(18), bold=True)
+            _style(tb.text_frame, ct, tc["title"], Pt(16), bold=True)
         if cd:
-            tb = slide.shapes.add_textbox(x, y + Cm(4.2), cw, Cm(6))
+            tb = slide.shapes.add_textbox(x, y + Cm(4.2), cw, Cm(5.5))
             _style(tb.text_frame, cd, tc["muted"], Pt(12))
 
 
@@ -221,10 +202,9 @@ def _build_4col(slide, item, tc):
     title = item.get("title", "")
     if title:
         tb = slide.shapes.add_textbox(MARGIN, Cm(3.8), CONTENT_W, Cm(2.5))
-        _style(tb.text_frame, title, tc["title"], Pt(30), bold=True, ls=-200)
+        _style(tb.text_frame, title, tc["title"], Pt(28), bold=True, ls=-200)
 
     # Горизонтальная линия
-    from pptx.util import Inches
     line_y = Cm(7)
     ln = slide.shapes.add_connector(1, MARGIN, line_y, MARGIN + CONTENT_W, line_y)
     ln.line.color.rgb = tc.get("line", RGBColor(0x30, 0x30, 0x30))
@@ -239,13 +219,12 @@ def _build_4col(slide, item, tc):
         ct = col.get("title", "")
         cd = col.get("description", col.get("body", ""))
 
-        # Номер в кружке
+        # Номер
         tb = slide.shapes.add_textbox(x, Cm(7.5), Cm(2), Cm(1.5))
         _style(tb.text_frame, num, tc["accent"], Pt(14), bold=True)
-
         if ct:
             tb = slide.shapes.add_textbox(x, Cm(9.5), cw, Cm(2))
-            _style(tb.text_frame, ct, tc["title"], Pt(17), bold=True)
+            _style(tb.text_frame, ct, tc["title"], Pt(16), bold=True)
         if cd:
             tb = slide.shapes.add_textbox(x, Cm(12), cw, Cm(5))
             _style(tb.text_frame, cd, tc["muted"], Pt(12))
@@ -260,7 +239,7 @@ def _build_6col(slide, item, tc):
     title = item.get("title", "")
     if title:
         tb = slide.shapes.add_textbox(MARGIN, Cm(3.8), CONTENT_W, Cm(2.5))
-        _style(tb.text_frame, title, tc["title"], Pt(30), bold=True, ls=-200)
+        _style(tb.text_frame, title, tc["title"], Pt(28), bold=True, ls=-200)
 
     cols = item.get("columns", [])
     cw = Cm(4.6)
@@ -275,10 +254,9 @@ def _build_6col(slide, item, tc):
         ln = slide.shapes.add_connector(1, x, y, x + cw, y)
         ln.line.color.rgb = tc["accent"]
         ln.line.width = Pt(2)
-
         if ct:
             tb = slide.shapes.add_textbox(x, y + Cm(0.5), cw, Cm(1.5))
-            _style(tb.text_frame, ct, tc["title"], Pt(14), bold=True)
+            _style(tb.text_frame, ct, tc["title"], Pt(13), bold=True)
         if cd:
             tb = slide.shapes.add_textbox(x, y + Cm(2.5), cw, Cm(7))
             _style(tb.text_frame, cd, tc["muted"], Pt(11))
@@ -291,27 +269,16 @@ def _build_content(slide, item, tc):
         _style(tb.text_frame, label.upper(), tc["accent"], Pt(11), bold=False, spacing=2200)
 
     title = item.get("title", "")
-    tb = slide.shapes.add_textbox(MARGIN, Cm(4), CONTENT_W, Cm(4))
-    _style(tb.text_frame, title, tc["title"], Pt(36), bold=True, ls=-200)
+    tb = slide.shapes.add_textbox(MARGIN, Cm(4.5), CONTENT_W, Cm(4))
+    _style(tb.text_frame, title, tc["title"], Pt(32), bold=True, ls=-200)
 
     body = item.get("body", "")
     if body:
         tb = slide.shapes.add_textbox(MARGIN, Cm(9.5), CONTENT_W, Cm(7))
         _style(tb.text_frame, body, tc["body"], Pt(14))
 
-    # Если есть колонки, разместить их
-    cols = item.get("columns", [])
-    if cols:
-        n = len(cols)
-        if n <= 3:
-            _build_3col(slide, item, tc)
-        elif n <= 4:
-            _build_4col(slide, item, tc)
-        else:
-            _build_6col(slide, item, tc)
 
-
-# ─── HELPERS ──────────────────────────────────────
+# ─── HELPERS ──────────────────────────────────────────────
 
 def _colors(dark):
     if dark:
@@ -361,41 +328,16 @@ def _fmt_run(p, color, size, bold=False, ls=0, spacing=0):
             run.font._element.attrib['{http://schemas.openxmlformats.org/drawingml/2006/main}spc'] = str(spacing)
 
 
-def _set_text(tf, text):
-    if not tf.paragraphs:
-        return
-    from pptx.oxml.ns import qn
-    txBody = tf._txBody
-    for p in txBody.findall(qn("a:p"))[1:]:
-        txBody.remove(p)
-    first = tf.paragraphs[0]
-    if first.runs:
-        first.runs[0].text = text
-        for r in first.runs[1:]:
-            r.text = ""
-    else:
-        run = first.add_run()
-        run.text = text
-
-
 def _add_bars(slide, x, y, color):
-    widths = [Cm(3.5), Cm(2.5), Cm(1.5)]
+    widths = [Cm(3), Cm(2), Cm(1)]
     for i, w in enumerate(widths):
         ln = slide.shapes.add_connector(
             1,
-            x + Cm(i * 0.8), y + Cm(i * 0.5),
-            x + Cm(i * 0.8) + w, y + Cm(i * 0.5),
+            x + Cm(i * 0.7), y + Cm(i * 0.5),
+            x + Cm(i * 0.7) + w, y + Cm(i * 0.5),
         )
         ln.line.color.rgb = color
         ln.line.width = Pt(3)
-
-
-def _is_title_shape(shape):
-    try:
-        ph = shape.placeholder_format
-        return ph is not None and ph.idx == 0
-    except Exception:
-        return False
 
 
 def _save_tmp(prs):
