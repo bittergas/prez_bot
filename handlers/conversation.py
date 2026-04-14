@@ -155,13 +155,12 @@ async def handle_iteration_feedback(update: Update, context: ContextTypes.DEFAUL
                     )
         except Exception as e:
             await reply_fn(f"❌ Ошибка: {e}")
+            return ITERATING
         post_keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("✏️ Доработать ещё", callback_data="refine_after_download")],
-                [InlineKeyboardButton("✅ Всё готово, завершить", callback_data="done")],
-            ])
-            await reply_fn("Хочешь что-то доработать?", reply_markup=post_keyboard)
-        except Exception as e:
-            await reply_fn(f"❌ Ошибка: {e}")
+            [InlineKeyboardButton("✏️ Доработать ещё", callback_data="refine_after_download")],
+            [InlineKeyboardButton("✅ Всё готово, завершить", callback_data="done")],
+        ])
+        await reply_fn("Хочешь что-то доработать?", reply_markup=post_keyboard)
         return ITERATING
 
     if feedback == "done":
