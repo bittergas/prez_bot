@@ -155,7 +155,32 @@ async def handle_iteration_feedback(update: Update, context: ContextTypes.DEFAUL
                     )
         except Exception as e:
             await reply_fn(f"❌ Ошибка: {e}")
+        post_keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("✏️ Доработать ещё", callback_data="refine_after_download")],
+                [InlineKeyboardButton("✅ Всё готово, завершить", callback_data="done")],
+            ])
+            await reply_fn("Хочешь что-то доработать?", reply_markup=post_keyboard)
+        except Exception as e:
+            await reply_fn(f"❌ Ошибка: {e}")
+        return ITERATING
+
+    if feedback == "done":
+        await reply_fn("👍 Отлично! Удачи с презентацией!")
         return ConversationHandler.END
+
+    if feedback == "refine_after_download":
+        iteration_keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Принять и скачать", callback_data="accept")],
+            [InlineKeyboardButton("🔄 Сделать строже", callback_data="more_formal")],
+            [InlineKeyboardButton("🎨 Сделать живее", callback_data="more_vivid")],
+            [InlineKeyboardButton("✏️ Напиши своё", callback_data="custom")],
+        ])
+        preview = _format_preview(improved_slides)
+        await reply_fn(
+            f"Текущая версия ({len(improved_slides)} сл.):\n\n{preview}\n\nЧто доработать?",
+            reply_markup=iteration_keyboard,
+        )
+        return ITERATING
 
     if iteration >= 5:
         await reply_fn(
