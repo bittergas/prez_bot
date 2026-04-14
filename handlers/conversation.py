@@ -32,7 +32,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "что нужно сделать — и я создам презентацию.\n\n"
         "Команда /cancel — отменить в любой момент."
     )
-    return WAITING_FILE
 
 async def handle_text_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["text_request"] = update.message.text
@@ -74,14 +73,13 @@ async def handle_theme_choice(update: Update, context: ContextTypes.DEFAULT_TYPE
         "theme_combined": "combined",
     }
     theme = theme_map.get(choice, "combined")
-    theme_labels = {"dark": "тёмная", "light": "светлая", "combined": "комбинированная"}
     context.user_data["theme"] = theme
+
     file_path = context.user_data.get("file_path")
     text_request = context.user_data.get("text_request", "")
 
-    await query.edit_message_text(
-        f"🎨 Тема: {theme_labels[theme]}\n"
-        "⏳ Шаг 1/3: запускаю Claude Opus для анализа контента..."
+    await query.message.reply_text(
+        "⏳ Шаг 1/3: анализирую контент с помощью Claude Opus..."
     )
     try:
         improved_slides = await analyze_and_improve(
@@ -109,14 +107,13 @@ async def handle_theme_choice(update: Update, context: ContextTypes.DEFAULT_TYPE
         slide_count = len(improved_slides)
         layouts = [s.get("layout", "?") for s in improved_slides]
         await query.message.reply_text(
-            f"📋 *Вариант 1*\n\n"
-            f"📐 Слайдов: {slide_count} | Лейауты: {', '.join(layouts[:5])}{'...' if len(layouts)>5 else ''}\n\n"
-            f"{preview}",
-            parse_mode="Markdown",
+            f"✨ Готово! Вот структура презентации ({slide_count} сл., итерация 1):\n\n"
+            f"{preview}\n\n"
+            f"Лейауты: {', '.join(layouts)}\n\n"
+            "Как тебе? Можно принять или доработать:",
             reply_markup=iteration_keyboard,
         )
     except Exception as e:
-        logger.error("presentation error: %s", e)
         await query.message.reply_text(f"❌ Ошибка: {e}")
         return ConversationHandler.END
     return ITERATING
@@ -153,14 +150,13 @@ async def handle_iteration_feedback(update: Update, context: ContextTypes.DEFAUL
                         filename="presentation.pptx",
                         caption="✅ Готово! Вот твоя презентация 🎉"
                     )
+            post_keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("✏️ Доработать ещё", callback_data="refine_after_download")],
+                [InlineKeyboardButton("✅ Всё готово, завершить", callback_data="done")],
+            ])
+            await reply_fn("Хочешь что-то доработать?", reply_markup=post_keyboard)
         except Exception as e:
             await reply_fn(f"❌ Ошибка: {e}")
-            return ITERATING
-        post_keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("✏️ Доработать ещё", callback_data="refine_after_download")],
-            [InlineKeyboardButton("✅ Всё готово, завершить", callback_data="done")],
-        ])
-        await reply_fn("Хочешь что-то доработать?", reply_markup=post_keyboard)
         return ITERATING
 
     if feedback == "done":
@@ -204,7 +200,7 @@ async def handle_iteration_feedback(update: Update, context: ContextTypes.DEFAUL
             update.callback_query.data = "accept"
             return await handle_iteration_feedback(update, context)
         else:
-            await reply_fn("⚙️ Генерирую финальный файл...")
+            await reply_fn("⚙️ Генерирую финальный .pptx файл...")
             try:
                 output_path = process_for_client(file_path, improved_slides, theme)
                 with open(output_path, "rb") as f:
@@ -237,39 +233,33 @@ async def handle_iteration_feedback(update: Update, context: ContextTypes.DEFAUL
             [InlineKeyboardButton("✏️ Напиши своё", callback_data="custom")],
         ])
         await reply_fn(
-            f"📋 *Вариант {iteration + 1}*\n\n"
-            f"📐 Слайдов: {len(new_slides)} | Лейауты: {', '.join(layouts[:5])}{'...' if len(layouts)>5 else ''}\n\n"
-            f"{preview}",
-            parse_mode="Markdown",
+            f"✨ Итерация {iteration + 1} ({len(new_slides)} сл.):\n\n"
+            f"{preview}\n\n"
+            f"Лейауты: {', '.join(layouts)}\n\n"
+            "Как теперь?",
             reply_markup=iteration_keyboard,
         )
     except Exception as e:
-        await reply_fn(f"❌ Ошибка: {e}")
-        return ConversationHandler.END
+        await reply_fn(f"❌ Ошибка при итерации: {e}")
     return ITERATING
+
 
 def _format_preview(slides: list[dict]) -> str:
     lines = []
-    for i, slide in enumerate(slides[:4], 1):
-        layout = slide.get("layout", "?")
-        title = slide.get("title", "").strip()
-        body = slide.get("body", "").strip()
-        cols = slide.get("columns", [])
-        lines.append(f"*Слайд {i}* [{layout}]: {title}")
-        if body:
-            short = body[:80] + ("…" if len(body) > 80 else "")
-            lines.append(f"_{ short}_")
-        elif cols:
-            col_titles = ", ".join(c.get("title", c.get("value", ""))[:20] for c in cols[:3])
-            lines.append(f"_Кол: {col_titles}_")
-        lines.append("")
-    if len(slides) > 4:
-        lines.append(f"_...и ещё {len(slides) - 4} слайдов_")
+    for i, s in enumerate(slides, 1):
+        title = s.get("title", "—")
+        subtitle = s.get("subtitle", "")
+        layout = s.get("layout", "")
+        line = f"*{i}. {title}*"
+        if subtitle:
+            line += f"\n   _{subtitle}_"
+        if layout:
+            line += f" [{layout}]"
+        lines.append(line)
     return "\n".join(lines)
+
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
-    await update.message.reply_text(
-        "❌ Отменено. Напиши когда будешь готов — начнём заново."
-    )
+    await update.message.reply_text("❌ Отменено. Напиши /start чтобы начать заново.")
     return ConversationHandler.END
