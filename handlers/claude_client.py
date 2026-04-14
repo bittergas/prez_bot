@@ -47,7 +47,7 @@ H3 (card title): 18-22pt, межстрочный 1.1, letter-spacing -0.02em
 
 ### layout: "hero" (ТОЛЬКО для слайда 1 — обязательно!)
 Титульный слайд. Крупный заголовок (54-72pt), подзаголовок, декоративные полосы.
-Поле label: категория/тег сверху. Поле body: подзаголовок/слоган.
+Поле body: подзаголовок/слоган. НЕ добавлять label — они выглядят шаблонно.
 ВСЕГДА ПЕРВЫЙ СЛАЙД = hero.
 
 ### layout: "quote" или "insight" (слайды с цитатами/инсайтами)
@@ -97,6 +97,7 @@ columns: [{"title": "...", "description": "..."}, ...]
 - Последний слайд НЕ cta — КРИТИЧЕСКАЯ ОШИБКА
 - Более 5-6 строк текста на слайде
 - Bullet points стандартные PowerPoint
+- Теги-лейблы на каждом слайде ("INVESTMENT OPPORTUNITY", "KEY INSIGHT" и т.д.) — это маркер AI-генерации
 """
 
 THEME_DARK = """
@@ -232,7 +233,9 @@ def _build_prompt(slides_text: str, text_request: str, theme: str) -> str:
         '2. Последний слайд ВСЕГДА layout=\"cta\" — призыв к действию\n'
         "3. Используй РАЗНЫЕ layout для каждого слайда (никогда не повторять подряд)\n"
         "4. Обязательно включи: hero, quote, 2col, 4col или 3col, 6col или 3col, cta\n"
-        "5. Для layout 2col/3col/4col/6col — заполняй массив columns[]\n\n"
+        "5. Для layout 2col/3col/4col/6col — заполняй массив columns[]\n"
+        "6. Крупные цифры в columns должны быть короткими: $500M+, EBITDA+, 20M+ (не разбивать!)\n"
+        "7. НЕ добавляй поле label — оно не используется\n\n"
         "Принципы контента:\n"
         "- Каждый слайд — одна ключевая мысль\n"
         "- Заголовки — выгоды и результаты, не процессы\n"
@@ -251,15 +254,15 @@ def _build_prompt(slides_text: str, text_request: str, theme: str) -> str:
         "- slide_index: номер слайда (начиная с 1)\n"
         "- layout: тип лейаута (hero/quote/insight/2col/3col/4col/6col/cta/content)\n"
         "- slide_type: тип слайда (hero/insight/philosophy/services/portfolio/infrastructure/process/why/cta)\n"
-        '- label: подпись-лейбл сверху (uppercase, напр. \"PHILOSOPHY\")\n'
+        
         "- title: заголовок\n"
         "- body: основной текст (для 1-колоночных слайдов)\n"
         "- columns: массив колонок (для 2col/3col/4col/6col)\n"
         "- bg_color: hex цвет фона согласно выбранной теме\n\n"
         "ПРИМЕРЫ:\n"
-        'Слайд 1: {"slide_index": 1, "layout": "hero", "slide_type": "hero", "label": "AMA PRIVATE CLUB", '
+        'Слайд 1: {"slide_index": 1, "layout": "hero", "slide_type": "hero", '
         '"title": "Заголовок", "body": "Подзаголовок", "bg_color": "#07090E"}\n'
-        'Слайд 4 (4col): {"slide_index": 4, "layout": "4col", "slide_type": "process", "label": "PROCESS", '
+        'Слайд 4 (4col): {"slide_index": 4, "layout": "4col", "slide_type": "process", '
         '"title": "Наш процесс", "columns": [{"number": "01", "title": "Анализ", "description": "Текст..."}, '
         '{"number": "02", "title": "Стратегия", "description": "Текст..."}], "bg_color": "#07090E"}\n\n'
         "Верни ТОЛЬКО JSON-массив. Никакого вступления, только JSON.\n"
